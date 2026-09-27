@@ -283,35 +283,83 @@ def save_job_to_csv(job: dict):
 # ════════════════════════════════════════════════════════════════════════════
 # STEP 1 — DISCOVER LOCATIONS FROM THE HOMEPAGE
 # ════════════════════════════════════════════════════════════════════════════
+_LOCATION_HREF_RE = re.compile(r"^/empleos-en-[a-z0-9-]+/?$", re.IGNORECASE)
+
+
 def get_location_urls() -> list:
     """
-    Scrapes the "Bolsa de empleo según: Localidad" block on the Argentina
-    homepage, which lists department links (e.g. /empleos-en-antioquia) and
-    their main cities (e.g. /empleos-en-medellin). Returns full URLs,
-    de-duplicated and in the order they appear on the page.
+    Finds the location links (e.g. /empleos-en-cordoba, /empleos-en-mendoza)
+    on the Argentina homepage. Returns full URLs, de-duplicated and in the
+    order they appear on the page.
+
+    FIX: this used to require a specific container — soup.select_one("div.lL")
+    then "ul#content_1 a[href]" inside it — copied verbatim from the Colombia
+    scraper (even the docstring still said "/empleos-en-antioquia", a
+    Colombian city). That container class/id is Colombia's homepage template
+    and was never verified against Argentina's actual markup. When it didn't
+    match, get_location_urls() silently returned [], run() logged "No
+    locations found — aborting" and returned *before* ever calling
+    save_progress() — which is why processed.csv existed (created earlier by
+    load_processed_ids()) but computrabajo_progress.json never did.
+
+    Fix: try the original specific container first (cheap, and still works
+    if it happens to match), then fall back to scanning the WHOLE homepage
+    for any <a href> matching Computrabajo's shared "/empleos-en-<place>"
+    URL pattern, regardless of which container class/id the country's
+    template wraps it in. If both come up empty, dump the homepage HTML to
+    disk so it can be inspected instead of failing silently again.
     """
     logger.info(f"Fetching homepage: {HOME_URL}")
     soup = get_soup(HOME_URL)
 
-    container = soup.select_one("div.lL")
-    if not container:
-        logger.warning("Could not find the location block (div.lL) on the homepage.")
-        return []
-
     seen = set()
     urls = []
-    for a in container.select("ul#content_1 a[href]"):
-        href = a.get("href", "").strip()
-        if not href or href.startswith("http") and BASE_URL not in href:
-            continue
-        full = urljoin(BASE_URL, href)
-        if full not in seen:
-            seen.add(full)
-            urls.append(full)
 
-    logger.info(f"📍 Found {len(urls)} location URLs on the homepage.")
-    for i, u in enumerate(urls):
-        logger.debug(f"    [{i}] {u}")
+    def _collect(anchors):
+        for a in anchors:
+            href = a.get("href", "").strip()
+            if not href or (href.startswith("http") and BASE_URL not in href):
+                continue
+            full = urljoin(BASE_URL, href)
+            if full not in seen:
+                seen.add(full)
+                urls.append(full)
+
+    # Attempt 1 — the original Colombia-shaped container, in case this
+    # country's template happens to match it too.
+    container = soup.select_one("div.lL")
+    if container:
+        _collect(container.select("ul#content_1 a[href]"))
+        if urls:
+            logger.info(f"📍 Found {len(urls)} location URLs via the div.lL container.")
+
+    # Attempt 2 — pattern-based fallback across the whole page. This is what
+    # actually fixes Argentina (and any other country whose template doesn't
+    # use div.lL / ul#content_1).
+    if not urls:
+        logger.info("div.lL container not found or empty — falling back to a "
+                     "site-wide scan for /empleos-en-<place> links.")
+        _collect(a for a in soup.select("a[href]")
+                  if _LOCATION_HREF_RE.match(urlparse(a.get("href", "")).path or a.get("href", "")))
+
+    if not urls:
+        # Persist the raw HTML so the actual markup can be inspected instead
+        # of guessing again — this file also gets committed back to the repo
+        # via the workflow's "Commit progress back to the repo" step if you
+        # add it to that file list.
+        debug_path = "homepage_debug.html"
+        try:
+            with open(debug_path, "w", encoding="utf-8") as f:
+                f.write(str(soup))
+            logger.error(f"❌ No location URLs found via either method. Homepage HTML "
+                         f"dumped to {debug_path} for inspection.")
+        except OSError as e:
+            logger.error(f"❌ No location URLs found, and failed to write debug HTML: {e}")
+    else:
+        logger.info(f"📍 Found {len(urls)} location URLs on the homepage.")
+        for i, u in enumerate(urls):
+            logger.debug(f"    [{i}] {u}")
+
     return urls
 
 
