@@ -55,24 +55,32 @@ jobs:
           MAX_RUNTIME_SECONDS: "20000"
         run: python computrabajo_ar_scraper.py
 
-      # ── FIX ──────────────────────────────────────────────────────────────
+      # ── FIX #1 ───────────────────────────────────────────────────────────
       # The old version of this step did:
       #   git add -A -- processed.csv computrabajo_progress.json scraped_jobs.csv debug.log SCRAPE_COMPLETE.flag
       # `git add` with an explicit pathspec list errors out (exit 128,
       # "did not match any files") if EVEN ONE of those files doesn't exist
       # yet. Because this step has `if: always()`, it also runs after a
-      # failed "Run scraper" step — and if the scraper crashed before writing
-      # anything, this step would blow up on a missing file and mask the
-      # real error. Now it only adds files that actually exist, and says so.
+      # failed "Run scraper" step — and if the scraper crashed (or aborted
+      # early, as it was doing before the get_location_urls() fix) before
+      # writing everything, this step would blow up on a missing file and
+      # mask the real error. Now it only adds files that actually exist.
+      #
+      # ── FIX #2 ───────────────────────────────────────────────────────────
+      # homepage_debug.html added to the file list: the patched script now
+      # writes this file if it ever finds zero location URLs again, so you
+      # can pull it down and inspect the real markup instead of guessing.
+      # It's added conditionally like the rest, so it's a no-op on any run
+      # where location discovery works fine and the file is never created.
       - name: Commit progress back to the repo
         if: always()   # commit whatever progress was made even if the run errored out
         run: |
           git config user.name "computrabajo-scraper-bot"
           git config user.email "actions@users.noreply.github.com"
 
-          # Only add files that actually exist — see FIX note above.
+          # Only add files that actually exist — see FIX #1 note above.
           files=()
-          for f in processed.csv computrabajo_progress.json scraped_jobs.csv debug.log SCRAPE_COMPLETE.flag; do
+          for f in processed.csv computrabajo_progress.json scraped_jobs.csv debug.log SCRAPE_COMPLETE.flag homepage_debug.html; do
             if [ -f "$f" ]; then
               files+=("$f")
             else
@@ -100,6 +108,8 @@ jobs:
           if [ -f SCRAPE_COMPLETE.flag ]; then
             echo "✅ All locations fully scraped. Future scheduled runs will exit instantly until the flag file is deleted."
             cat SCRAPE_COMPLETE.flag
+          elif [ -f homepage_debug.html ]; then
+            echo "🐛 Location discovery found nothing this run — homepage_debug.html was committed for inspection."
           else
             echo "⏱ Time budget reached (or run ended) before finishing all locations."
             echo "The next scheduled run (within ~15 min) will resume automatically from computrabajo_progress.json."
