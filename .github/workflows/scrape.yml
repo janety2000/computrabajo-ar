@@ -53,7 +53,7 @@ jobs:
           # step below, so the script always has time to save progress and
           # exit cleanly on its own before GitHub would kill it mid-request.
           MAX_RUNTIME_SECONDS: "20000"
-        run: python computrabajo_co_scraper.py
+        run: python computrabajo_ar_scraper.py
 
       - name: Commit progress back to the repo
         if: always()   # commit whatever progress was made even if the run errored out
