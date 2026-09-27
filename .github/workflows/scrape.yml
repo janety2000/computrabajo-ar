@@ -1,4 +1,4 @@
-name: Computrabajo Colombia Scraper
+name: Computrabajo Argentina Scraper
 
 on:
   workflow_dispatch: {}        # lets you trigger a run manually from the Actions tab
@@ -55,12 +55,37 @@ jobs:
           MAX_RUNTIME_SECONDS: "20000"
         run: python computrabajo_ar_scraper.py
 
+      # ── FIX ──────────────────────────────────────────────────────────────
+      # The old version of this step did:
+      #   git add -A -- processed.csv computrabajo_progress.json scraped_jobs.csv debug.log SCRAPE_COMPLETE.flag
+      # `git add` with an explicit pathspec list errors out (exit 128,
+      # "did not match any files") if EVEN ONE of those files doesn't exist
+      # yet. Because this step has `if: always()`, it also runs after a
+      # failed "Run scraper" step — and if the scraper crashed before writing
+      # anything, this step would blow up on a missing file and mask the
+      # real error. Now it only adds files that actually exist, and says so.
       - name: Commit progress back to the repo
         if: always()   # commit whatever progress was made even if the run errored out
         run: |
           git config user.name "computrabajo-scraper-bot"
           git config user.email "actions@users.noreply.github.com"
-          git add -A -- processed.csv computrabajo_progress.json scraped_jobs.csv debug.log SCRAPE_COMPLETE.flag
+
+          # Only add files that actually exist — see FIX note above.
+          files=()
+          for f in processed.csv computrabajo_progress.json scraped_jobs.csv debug.log SCRAPE_COMPLETE.flag; do
+            if [ -f "$f" ]; then
+              files+=("$f")
+            else
+              echo "ℹ️  $f not present this run — skipping."
+            fi
+          done
+
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "⚠️  None of the expected output files exist — the scraper likely failed before writing anything. Check the 'Run scraper' step logs."
+            exit 0
+          fi
+
+          git add -A -- "${files[@]}"
           if git diff --cached --quiet; then
             echo "No progress changes to commit."
           else
