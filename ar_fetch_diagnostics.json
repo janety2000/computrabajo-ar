@@ -5,13 +5,13 @@
       "attempt": 1,
       "status_code": 200,
       "response_headers": {
-        "Date": "Mon, 28 Sep 2026 18:34:38 GMT",
+        "Date": "Tue, 29 Sep 2026 02:33:18 GMT",
         "Content-Type": "text/html; charset=utf-8",
         "Transfer-Encoding": "chunked",
         "Connection": "keep-alive",
         "Cache-Control": "private,max-age=300",
         "Content-Encoding": "gzip",
-        "Age": "100",
+        "Age": "107",
         "Vary": "*"
       },
       "body_length": 122902,
